@@ -2,34 +2,23 @@
 seed.py — Execute schema.sql then populate the database with realistic sample data.
 
 Usage:
-    pip install psycopg2-binary bcrypt
     python seed.py
 
-Environment variables (or edit the CONFIG dict below):
+Environment variables (or edit config.py):
     DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD
 """
 
 import os
+import sys
 import random
 from datetime import date, timedelta, datetime, timezone
 
 import psycopg2
 from psycopg2.extras import execute_values
 
-# CONFIGS
-
-CONFIG = {
-    "host":     os.getenv("DB_HOST",     "localhost"),
-    "port":     os.getenv("DB_PORT",     "5432"),
-    "dbname":   os.getenv("DB_NAME",     "school_db"),
-    "user":     os.getenv("DB_USER",     "postgres"),
-    "password": os.getenv("DB_PASSWORD", "postgres"),
-}
-
-
-HASHED_PASSWORD = "$2b$12$KIX9d3lB3FJn7w0pY9k3CO5aZlGmT/oPJfZkE6H4mGqVMNFUJ5Rai"
-
-SCHEMA_FILE = os.path.join(os.path.dirname(__file__), "schema.sql")
+# Import shared config
+sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+from config import CONFIG, HASHED_PASSWORD, SCHEMA_FILE
 
 # HELPERS
 
@@ -51,12 +40,12 @@ def main():
     cur = conn.cursor()
 
     try:
-        # 1. Create tables 
+        # 1. Create tables
         print("→ Running schema.sql …")
         with open(SCHEMA_FILE, "r") as f:
             cur.execute(f.read())
 
-        # 2. School info ──
+        # 2. School info
         print("→ Seeding school_info …")
         cur.execute("""
             INSERT INTO school_info
@@ -71,7 +60,7 @@ def main():
             ON CONFLICT (id) DO NOTHING;
         """)
 
-        # 3. Academic years 
+        # 3. Academic years
         print("→ Seeding academic_years …")
         cur.execute("""
             INSERT INTO academic_years (name, start_date, end_date, is_current)
@@ -84,103 +73,110 @@ def main():
         ay_ids = [row[0] for row in cur.fetchall()]
         current_ay_id = ay_ids[2]   # 2024-2025 Sem 1
 
-        # 4. Users — admins 
+        # 4. Users — admins
         print("→ Seeding admin users …")
         admin_data = [
             ("admin1@school.et", "admin"),
             ("admin2@school.et", "admin"),
         ]
+        # username = email local part (e.g. admin1)
         cur.executemany("""
-            INSERT INTO users (role, email, password_hash)
-            VALUES (%s, %s, %s)
-        """, [(r, e, HASHED_PASSWORD) for e, r in admin_data])
+            INSERT INTO users (role, username, email, password_hash)
+            VALUES (%s, %s, %s, %s)
+        """, [(r, e.split("@")[0], e, HASHED_PASSWORD) for e, r in admin_data])
 
         cur.execute("SELECT id FROM users WHERE role = 'admin' ORDER BY id")
         admin_user_ids = [row[0] for row in cur.fetchall()]
 
         admin_profiles = [
-            (admin_user_ids[0], "Tigist Hailu",   rand_phone()),
-            (admin_user_ids[1], "Bereket Tadesse", rand_phone()),
+            (admin_user_ids[0], "Tigist",   "Hailu",   rand_phone()),
+            (admin_user_ids[1], "Bereket",  "Tadesse",  rand_phone()),
         ]
         execute_values(cur, """
-            INSERT INTO admins (user_id, full_name, phone) VALUES %s
+            INSERT INTO admins (user_id, first_name, last_name, phone) VALUES %s
         """, admin_profiles)
 
         cur.execute("SELECT id FROM admins ORDER BY id")
         admin_ids = [row[0] for row in cur.fetchall()]
 
-        # 5. Users — teachers ──
+        # 5. Users — teachers
         print("→ Seeding teachers …")
-        teacher_names = [
-            "Abebe Girma", "Selamawit Tesfaye", "Dawit Alemu",
-            "Hiwot Mulugeta", "Yonas Bekele", "Meron Tadesse",
-            "Kebede Worku", "Azeb Haile",
+        teacher_data = [
+            ("Abebe",      "Girma"),
+            ("Selamawit",  "Tesfaye"),
+            ("Dawit",      "Alemu"),
+            ("Hiwot",      "Mulugeta"),
+            ("Yonas",      "Bekele"),
+            ("Meron",      "Tadesse"),
+            ("Kebede",     "Worku"),
+            ("Azeb",       "Haile"),
         ]
         teacher_emails = [
-            f"teacher{i+1}@school.et" for i in range(len(teacher_names))
+            f"teacher{i+1}@school.et" for i in range(len(teacher_data))
         ]
+        # username = email local part (e.g. teacher1)
         cur.executemany("""
-            INSERT INTO users (role, email, password_hash) VALUES (%s, %s, %s)
-        """, [("teacher", e, HASHED_PASSWORD) for e in teacher_emails])
+            INSERT INTO users (role, username, email, password_hash) VALUES (%s, %s, %s, %s)
+        """, [("teacher", e.split("@")[0], e, HASHED_PASSWORD) for e in teacher_emails])
 
         cur.execute("SELECT id FROM users WHERE role = 'teacher' ORDER BY id")
         teacher_user_ids = [row[0] for row in cur.fetchall()]
 
         execute_values(cur, """
-            INSERT INTO teachers (user_id, full_name, phone, hire_date)
+            INSERT INTO teachers (user_id, first_name, last_name, phone, hire_date)
             VALUES %s
         """, [
-            (teacher_user_ids[i], teacher_names[i], rand_phone(),
+            (teacher_user_ids[i],
+             teacher_data[i][0],
+             teacher_data[i][1],
+             rand_phone(),
              rand_date(date(2015, 1, 1), date(2023, 8, 31)))
-            for i in range(len(teacher_names))
+            for i in range(len(teacher_data))
         ])
 
         cur.execute("SELECT id FROM teachers ORDER BY id")
         teacher_ids = [row[0] for row in cur.fetchall()]
 
-        # 6. Classes ──────
+        # 6. Classes
         print("→ Seeding classes …")
-        # Grade 9-12, sections A & B, assigned homeroom teachers
         class_specs = [
-            (current_ay_id, 9,  "A", "Room 101", teacher_ids[0]),
-            (current_ay_id, 9,  "B", "Room 102", teacher_ids[1]),
-            (current_ay_id, 10, "A", "Room 201", teacher_ids[2]),
-            (current_ay_id, 10, "B", "Room 202", teacher_ids[3]),
-            (current_ay_id, 11, "A", "Room 301", teacher_ids[4]),
-            (current_ay_id, 11, "B", "Room 302", teacher_ids[5]),
-            (current_ay_id, 12, "A", "Room 401", teacher_ids[6]),
-            (current_ay_id, 12, "B", "Room 402", teacher_ids[7]),
+            (current_ay_id, 9,  "A", "Grade 9A",  "Room 101", teacher_ids[0]),
+            (current_ay_id, 9,  "B", "Grade 9B",  "Room 102", teacher_ids[1]),
+            (current_ay_id, 10, "A", "Grade 10A", "Room 201", teacher_ids[2]),
+            (current_ay_id, 10, "B", "Grade 10B", "Room 202", teacher_ids[3]),
+            (current_ay_id, 11, "A", "Grade 11A", "Room 301", teacher_ids[4]),
+            (current_ay_id, 11, "B", "Grade 11B", "Room 302", teacher_ids[5]),
+            (current_ay_id, 12, "A", "Grade 12A", "Room 401", teacher_ids[6]),
+            (current_ay_id, 12, "B", "Grade 12B", "Room 402", teacher_ids[7]),
         ]
         execute_values(cur, """
             INSERT INTO classes
-                (academic_year_id, grade_level, name, room, homeroom_teacher_id)
+                (academic_year_id, grade_level, section, name, room, homeroom_teacher_id)
             VALUES %s
-            RETURNING id
         """, class_specs)
         cur.execute("SELECT id FROM classes ORDER BY id")
         class_ids = [row[0] for row in cur.fetchall()]
 
-        # 7. Subjects ─────
+        # 7. Subjects
         print("→ Seeding subjects …")
         subjects = [
-            ("Mathematics",       "MATH"),
-            ("English Language",  "ENG"),
-            ("Physics",           "PHY"),
-            ("Chemistry",         "CHEM"),
-            ("Biology",           "BIO"),
-            ("History",           "HIST"),
-            ("Geography",         "GEO"),
-            ("Physical Education","PE"),
+            ("Mathematics",        "MATH"),
+            ("English Language",   "ENG"),
+            ("Physics",            "PHY"),
+            ("Chemistry",          "CHEM"),
+            ("Biology",            "BIO"),
+            ("History",            "HIST"),
+            ("Geography",          "GEO"),
+            ("Physical Education", "PE"),
         ]
         execute_values(cur, """
-            INSERT INTO subjects (name, code) VALUES %s RETURNING id
+            INSERT INTO subjects (name, code) VALUES %s
         """, subjects)
         cur.execute("SELECT id FROM subjects ORDER BY id")
         subject_ids = [row[0] for row in cur.fetchall()]
 
-        # 8. class_subject_teachers ─────────────────────────────────────
+        # 8. class_subject_teachers
         print("→ Seeding class_subject_teachers …")
-        # Assign first 4 subjects to each class, cycling through teachers
         cst_rows = []
         for cls_id in class_ids:
             for j, subj_id in enumerate(subject_ids[:4]):
@@ -188,25 +184,28 @@ def main():
 
         execute_values(cur, """
             INSERT INTO class_subject_teachers (class_id, subject_id, teacher_id)
-            VALUES %s RETURNING id
+            VALUES %s
         """, cst_rows)
         cur.execute("SELECT id FROM class_subject_teachers ORDER BY id")
         cst_ids = [row[0] for row in cur.fetchall()]
 
-        # 9. Users — students ──
+        # 9. Users — students
         print("→ Seeding students …")
         student_first = ["Naol","Liya","Biruk","Eden","Robel","Sara","Yohannes","Hana",
                           "Mikias","Tigist","Abel","Marta","Fiker","Kiya","Solomon","Rahel",
                           "Amir","Blen","Daniel","Tsion"]
         student_last  = ["Tesfaye","Alemu","Bekele","Girma","Hailu","Tadesse","Worku","Kebede"]
 
-        student_names  = [f"{random.choice(student_first)} {random.choice(student_last)}"
-                          for _ in range(40)]
-        student_emails = [f"student{i+1}@school.et" for i in range(40)]
+        student_first_names = [random.choice(student_first) for _ in range(40)]
+        student_last_names  = [random.choice(student_last)  for _ in range(40)]
+        student_emails      = [f"student{i+1}@school.et" for i in range(40)]
+        # Student username == student_id_number, generated at approval time.
+        student_id_numbers  = [f"STU{2024000 + i + 1}" for i in range(40)]
 
         cur.executemany("""
-            INSERT INTO users (role, email, password_hash) VALUES (%s, %s, %s)
-        """, [("student", e, HASHED_PASSWORD) for e in student_emails])
+            INSERT INTO users (role, username, email, password_hash) VALUES (%s, %s, %s, %s)
+        """, [("student", student_id_numbers[i], student_emails[i], HASHED_PASSWORD)
+              for i in range(40)])
 
         cur.execute("SELECT id FROM users WHERE role = 'student' ORDER BY id")
         student_user_ids = [row[0] for row in cur.fetchall()]
@@ -217,8 +216,9 @@ def main():
             cls_id = class_ids[i // 5]
             student_rows.append((
                 student_user_ids[i],
-                f"STU{2024000 + i + 1}",
-                student_names[i],
+                student_id_numbers[i],
+                student_first_names[i],
+                student_last_names[i],
                 rand_date(date(2006, 1, 1), date(2010, 12, 31)),
                 random.choice(["male", "female"]),
                 rand_phone(),
@@ -228,14 +228,14 @@ def main():
 
         execute_values(cur, """
             INSERT INTO students
-                (user_id, student_id_number, full_name, date_of_birth,
+                (user_id, student_id_number, first_name, last_name, date_of_birth,
                  gender, phone, current_class_id, academic_status)
-            VALUES %s RETURNING id
+            VALUES %s
         """, student_rows)
         cur.execute("SELECT id FROM students ORDER BY id")
         student_ids = [row[0] for row in cur.fetchall()]
 
-        # 10. Enrollments ─
+        # 10. Enrollments
         print("→ Seeding enrollments …")
         enroll_rows = [
             (student_ids[i], class_ids[i // 5], current_ay_id, "active")
@@ -246,14 +246,15 @@ def main():
             VALUES %s
         """, enroll_rows)
 
-        # 11. Registration applications ─────────────────────────────────
+        # 11. Registration applications
         print("→ Seeding registration_applications …")
         statuses = ["pending_review", "approved", "rejected", "waiting_for_payment", "registered"]
         app_rows = []
         for i in range(10):
             st = statuses[i % len(statuses)]
             app_rows.append((
-                f"Applicant {i+1} Tesfaye",
+                f"Applicant{i+1}",
+                "Tesfaye",
                 rand_date(date(2008, 1, 1), date(2011, 12, 31)),
                 random.choice(["male", "female"]),
                 "Addis Ababa",
@@ -271,10 +272,10 @@ def main():
 
         execute_values(cur, """
             INSERT INTO registration_applications
-                (full_name, date_of_birth, gender, address, phone, email,
+                (first_name, last_name, date_of_birth, gender, address, phone, email,
                  grade_level, academic_year_id, guardian_name, guardian_relation,
                  guardian_phone, status, rejection_reason, payment_amount)
-            VALUES %s RETURNING id
+            VALUES %s
         """, app_rows)
         cur.execute("SELECT id FROM registration_applications ORDER BY id")
         app_ids = [row[0] for row in cur.fetchall()]
@@ -290,7 +291,7 @@ def main():
             VALUES %s
         """, doc_rows)
 
-        # 12. Attendance records 
+        # 12. Attendance records
         print("→ Seeding attendance_records …")
         att_rows = []
         school_days = [date(2024, 9, 1) + timedelta(days=d)
@@ -299,8 +300,8 @@ def main():
 
         for i, stu_id in enumerate(student_ids):
             cls_id       = class_ids[i // 5]
-            homeroom_tid = teacher_ids[i // 5]  # matches class spec above
-            for day in school_days[:10]:        # first 10 school days
+            homeroom_tid = teacher_ids[i // 5]
+            for day in school_days[:10]:   # first 10 school days
                 att_rows.append((
                     stu_id, cls_id, day,
                     random.choices(
@@ -317,14 +318,14 @@ def main():
             ON CONFLICT (student_id, date) DO NOTHING
         """, att_rows)
 
-        # 13. Assessments ─
+        # 13. Assessments
         print("→ Seeding assessments …")
         assessment_rows = []
-        for cst_id in cst_ids[:8]:     # first 8 CST rows (one per class for MATH)
+        for cst_id in cst_ids[:8]:    # first 8 CST rows (one per class for MATH)
             for atype, title, adate in [
-                ("quiz",    "Chapter 1 Quiz",      date(2024, 10, 5)),
-                ("midterm", "Midterm Examination",  date(2024, 11, 15)),
-                ("project", "Group Project",        date(2024, 12, 1)),
+                ("quiz",    "Chapter 1 Quiz",     date(2024, 10, 5)),
+                ("midterm", "Midterm Examination", date(2024, 11, 15)),
+                ("project", "Group Project",       date(2024, 12, 1)),
             ]:
                 assessment_rows.append(
                     (cst_id, current_ay_id, title, atype, 100, adate, True)
@@ -334,16 +335,15 @@ def main():
             INSERT INTO assessments
                 (class_subject_teacher_id, academic_year_id, title, type,
                  max_score, date, is_published)
-            VALUES %s RETURNING id
+            VALUES %s
         """, assessment_rows)
         cur.execute("SELECT id FROM assessments ORDER BY id")
         assessment_ids = [row[0] for row in cur.fetchall()]
 
-        # 14. Assessment scores 
+        # 14. Assessment scores
         print("→ Seeding assessment_scores …")
         score_rows = []
         for a_idx, assess_id in enumerate(assessment_ids):
-            # students in classes[a_idx // 3] (3 assessments per class)
             cls_index    = a_idx // 3
             stu_slice    = student_ids[cls_index * 5: cls_index * 5 + 5]
             recorder_tid = teacher_ids[cls_index % len(teacher_ids)]
@@ -361,7 +361,7 @@ def main():
             ON CONFLICT (assessment_id, student_id) DO NOTHING
         """, score_rows)
 
-        # 15. Announcements 
+        # 15. Announcements
         print("→ Seeding announcements …")
         ann_rows = [
             ("Welcome Back!", "A warm welcome to all students for the new semester.",
@@ -377,16 +377,15 @@ def main():
             INSERT INTO announcements
                 (title, body, type, target_class_id, published_by,
                  is_published, is_pinned, is_public)
-            VALUES %s RETURNING id
+            VALUES %s
         """, ann_rows)
         cur.execute("SELECT id FROM announcements ORDER BY id")
         ann_ids = [row[0] for row in cur.fetchall()]
 
-        # 16. Notifications 
+        # 16. Notifications
         print("→ Seeding notifications …")
         notif_rows = []
 
-        # All students get the school-wide announcements
         for stu_uid in student_user_ids[:10]:
             notif_rows.append((
                 stu_uid, None, "announcement",
@@ -394,7 +393,6 @@ def main():
                 "announcement", ann_ids[0],
             ))
 
-        # Grade 9A students get exam schedule notification
         grade9a_student_uids = [student_user_ids[i] for i in range(5)]
         for uid in grade9a_student_uids:
             notif_rows.append((
@@ -403,7 +401,6 @@ def main():
                 "announcement", ann_ids[1],
             ))
 
-        # Attendance warning for 3 students
         for uid in student_user_ids[:3]:
             notif_rows.append((
                 uid, admin_user_ids[0], "warning",
@@ -412,7 +409,6 @@ def main():
                 "attendance_record", None,
             ))
 
-        # Grade published notifications
         for uid in student_user_ids[:5]:
             notif_rows.append((
                 uid, None, "grade_published",
@@ -420,7 +416,6 @@ def main():
                 "assessment", assessment_ids[0],
             ))
 
-        # New registration notification for admins
         for admin_uid in admin_user_ids:
             notif_rows.append((
                 admin_uid, None, "registration",
@@ -435,35 +430,35 @@ def main():
             VALUES %s
         """, notif_rows)
 
-        # 17. Contact inquiries 
+        # 17. Contact inquiries
         print("→ Seeding contact_inquiries …")
         execute_values(cur, """
             INSERT INTO contact_inquiries (full_name, email, phone, subject, message)
             VALUES %s
         """, [
-            ("Aster Bekele", "aster@gmail.com", rand_phone(),
+            ("Aster Bekele",  "aster@gmail.com",   rand_phone(),
              "Admission Inquiry", "I would like to know the requirements for Grade 10 admission."),
             ("Tesfaye Girma", "tesfaye@gmail.com", rand_phone(),
              "Fee Structure",    "Could you please share the school fee structure for 2024-2025?"),
-            ("Mulu Alemu",   "mulu@gmail.com",    rand_phone(),
+            ("Mulu Alemu",    "mulu@gmail.com",    rand_phone(),
              "General",         "What extracurricular activities does the school offer?"),
         ])
 
-        # 18. Staff profiles ───
+        # 18. Staff profiles
         print("→ Seeding staff_profiles …")
         execute_values(cur, """
-            INSERT INTO staff_profiles (full_name, role_title, bio, order_index)
+            INSERT INTO staff_profiles (first_name, last_name, role_title, bio, order_index)
             VALUES %s
         """, [
-            ("Dr. Almaz Bekele",   "Principal",
+            ("Almaz",     "Bekele",  "Principal",
              "Dr. Almaz has led Sunrise Academy for 12 years with a focus on academic excellence.", 1),
-            ("Ato Kebede Worku",   "Vice Principal",
+            ("Kebede",    "Worku",   "Vice Principal",
              "Oversees daily school operations and student discipline.", 2),
-            ("W/ro Tigist Hailu",  "Head of Academics",
+            ("Tigist",    "Hailu",   "Head of Academics",
              "Coordinates curriculum development and teacher training.", 3),
-            ("Abebe Girma",        "Mathematics Teacher",
+            ("Abebe",     "Girma",   "Mathematics Teacher",
              "15 years of experience teaching mathematics at secondary level.", 4),
-            ("Selamawit Tesfaye",  "English Teacher",
+            ("Selamawit", "Tesfaye", "English Teacher",
              "Passionate about literature and language arts.", 5),
         ])
 

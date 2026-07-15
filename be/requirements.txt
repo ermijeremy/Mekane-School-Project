@@ -1,0 +1,15 @@
+# Web framework
+fastapi
+uvicorn[standard]
+
+# App DB access (async, psycopg 3)
+psycopg[binary]
+psycopg_pool
+
+# Auth / passwords
+bcrypt
+python-jose[cryptography]
+python-multipart
+
+# Seed script only (sync, psycopg 2)
+psycopg2-binary
