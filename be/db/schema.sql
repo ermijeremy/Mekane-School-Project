@@ -1,37 +1,39 @@
 -- USERS & AUTH
 
-CREATE TABLE users (
+CREATE TABLE IF NOT EXISTS users (
     id            BIGSERIAL PRIMARY KEY,
     role          VARCHAR(20)  NOT NULL CHECK (role IN ('admin', 'teacher', 'student')),
-    email         VARCHAR(255) NOT NULL UNIQUE,
+    username      VARCHAR(50)  NOT NULL UNIQUE,   -- login identifier (students: = student_id_number)
+    email         VARCHAR(255) UNIQUE,            -- optional contact info (nullable)
     password_hash VARCHAR(255) NOT NULL,
     is_active     BOOLEAN      NOT NULL DEFAULT TRUE,
     created_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
     updated_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 );
 
--- SCHOOL INFO
 
--- CREATE TABLE school_info (
---     id                INT PRIMARY KEY DEFAULT 1,  -- singleton row
---     name              VARCHAR(255) NOT NULL,
---     logo_url          VARCHAR(500),
---     address           TEXT,
---     phone             VARCHAR(50),
---     email             VARCHAR(255),
---     website           VARCHAR(255),
---     principal_name    VARCHAR(255),
---     principal_message TEXT,
---     established_year  INT,
---     map_embed_url     VARCHAR(500),
---     updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
---     CONSTRAINT school_info_singleton CHECK (id = 1)
--- );
+-- SCHOOL INFO (singleton row)
+
+CREATE TABLE IF NOT EXISTS school_info (
+    id                INT PRIMARY KEY DEFAULT 1,
+    name              VARCHAR(255) NOT NULL,
+    logo_url          VARCHAR(500),
+    address           TEXT,
+    phone             VARCHAR(50),
+    email             VARCHAR(255),
+    website           VARCHAR(255),
+    principal_name    VARCHAR(255),
+    principal_message TEXT,
+    established_year  INT,
+    map_embed_url     VARCHAR(500),
+    updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT school_info_singleton CHECK (id = 1)
+);
 
 
 -- ACADEMIC STRUCTURE
 
-CREATE TABLE academic_years (
+CREATE TABLE IF NOT EXISTS academic_years (
     id         BIGSERIAL PRIMARY KEY,
     name       VARCHAR(100) NOT NULL,  -- e.g. '2024-2025 Semester 1'
     start_date DATE         NOT NULL,
@@ -40,36 +42,40 @@ CREATE TABLE academic_years (
     created_at TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 );
 
--- Teachers table declared before classes because classes.homeroom_teacher_id references it
-CREATE TABLE teachers (
+-- Teachers declared before classes (classes.homeroom_teacher_id references it)
+CREATE TABLE IF NOT EXISTS teachers (
     id         BIGSERIAL PRIMARY KEY,
     user_id    BIGINT       NOT NULL UNIQUE REFERENCES users(id) ON DELETE RESTRICT,
-    full_name  VARCHAR(255) NOT NULL,
+    first_name VARCHAR(255) NOT NULL,
+    last_name  VARCHAR(255) NOT NULL,
     phone      VARCHAR(50),
     photo_url  VARCHAR(500),
+    hire_date  DATE,
     is_active  BOOLEAN      NOT NULL DEFAULT TRUE,
     created_at TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 );
 
--- Class rooms
-CREATE TABLE classes (
+CREATE TABLE IF NOT EXISTS classes (
     id                  BIGSERIAL PRIMARY KEY,
     academic_year_id    BIGINT      NOT NULL REFERENCES academic_years(id) ON DELETE RESTRICT,
     grade_level         INT         NOT NULL,   -- e.g. 9, 10, 11, 12
     section             VARCHAR(50) NOT NULL,   -- e.g. 'A', 'B', 'C'
+    name                VARCHAR(50),            -- e.g. 'Grade 9A'
+    room                VARCHAR(50),            -- e.g. 'Room 101'
     homeroom_teacher_id BIGINT      REFERENCES teachers(id) ON DELETE SET NULL,
     created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE (academic_year_id, grade_level, section)
 );
 
-CREATE TABLE subjects (
-    id          BIGSERIAL PRIMARY KEY,
-    name        VARCHAR(255) NOT NULL,
-    created_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+CREATE TABLE IF NOT EXISTS subjects (
+    id         BIGSERIAL PRIMARY KEY,
+    name       VARCHAR(255) NOT NULL,
+    code       VARCHAR(20)  UNIQUE,             -- e.g. 'MATH', 'ENG'
+    created_at TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 );
 
 -- Which teacher teaches which subject in which class
-CREATE TABLE class_subject_teachers (
+CREATE TABLE IF NOT EXISTS class_subject_teachers (
     id         BIGSERIAL PRIMARY KEY,
     class_id   BIGINT NOT NULL REFERENCES classes(id)   ON DELETE CASCADE,
     subject_id BIGINT NOT NULL REFERENCES subjects(id)  ON DELETE RESTRICT,
@@ -80,7 +86,7 @@ CREATE TABLE class_subject_teachers (
 
 -- PEOPLE
 
-CREATE TABLE admins (
+CREATE TABLE IF NOT EXISTS admins (
     id         BIGSERIAL PRIMARY KEY,
     user_id    BIGINT       NOT NULL UNIQUE REFERENCES users(id) ON DELETE RESTRICT,
     first_name VARCHAR(255) NOT NULL,
@@ -90,10 +96,10 @@ CREATE TABLE admins (
     created_at TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 );
 
-CREATE TABLE students (
+CREATE TABLE IF NOT EXISTS students (
     id                BIGSERIAL PRIMARY KEY,
     user_id           BIGINT      UNIQUE REFERENCES users(id) ON DELETE SET NULL,  -- null until approved
-    student_id_number VARCHAR(50) UNIQUE,  -- auto-generated on approval
+    student_id_number VARCHAR(50) UNIQUE,                                          -- auto-generated on approval
     first_name        VARCHAR(255) NOT NULL,
     last_name         VARCHAR(255) NOT NULL,
     date_of_birth     DATE,
@@ -109,7 +115,7 @@ CREATE TABLE students (
 );
 
 -- Enrollment history across academic years (promotions, transfers)
-CREATE TABLE enrollments (
+CREATE TABLE IF NOT EXISTS enrollments (
     id               BIGSERIAL PRIMARY KEY,
     student_id       BIGINT      NOT NULL REFERENCES students(id) ON DELETE CASCADE,
     class_id         BIGINT      NOT NULL REFERENCES classes(id)  ON DELETE RESTRICT,
@@ -123,10 +129,11 @@ CREATE TABLE enrollments (
 
 -- STUDENT REGISTRATION WORKFLOW
 
-CREATE TABLE registration_applications (
+CREATE TABLE IF NOT EXISTS registration_applications (
     id                   BIGSERIAL PRIMARY KEY,
     -- Applicant info
-    full_name            VARCHAR(255) NOT NULL,
+    first_name           VARCHAR(255) NOT NULL,
+    last_name            VARCHAR(255) NOT NULL,
     date_of_birth        DATE,
     gender               VARCHAR(20)  CHECK (gender IN ('male', 'female')),
     address              TEXT,
@@ -156,7 +163,7 @@ CREATE TABLE registration_applications (
     updated_at           TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 );
 
-CREATE TABLE registration_documents (
+CREATE TABLE IF NOT EXISTS registration_documents (
     id             BIGSERIAL PRIMARY KEY,
     application_id BIGINT       NOT NULL REFERENCES registration_applications(id) ON DELETE CASCADE,
     document_type  VARCHAR(100) NOT NULL
@@ -170,8 +177,8 @@ CREATE TABLE registration_documents (
 
 -- ATTENDANCE
 
--- Recorded once per student per day by the class homeroom teacher
-CREATE TABLE attendance_records (
+-- Recorded once per student per day by the homeroom teacher
+CREATE TABLE IF NOT EXISTS attendance_records (
     id          BIGSERIAL PRIMARY KEY,
     student_id  BIGINT      NOT NULL REFERENCES students(id)  ON DELETE CASCADE,
     class_id    BIGINT      NOT NULL REFERENCES classes(id)   ON DELETE RESTRICT,
@@ -186,7 +193,7 @@ CREATE TABLE attendance_records (
 
 -- ASSESSMENTS & GRADES
 
-CREATE TABLE assessments (
+CREATE TABLE IF NOT EXISTS assessments (
     id                       BIGSERIAL PRIMARY KEY,
     class_subject_teacher_id BIGINT       NOT NULL REFERENCES class_subject_teachers(id) ON DELETE RESTRICT,
     academic_year_id         BIGINT       NOT NULL REFERENCES academic_years(id)         ON DELETE RESTRICT,
@@ -199,7 +206,7 @@ CREATE TABLE assessments (
     created_at               TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 );
 
-CREATE TABLE assessment_scores (
+CREATE TABLE IF NOT EXISTS assessment_scores (
     id            BIGSERIAL PRIMARY KEY,
     assessment_id BIGINT        NOT NULL REFERENCES assessments(id) ON DELETE CASCADE,
     student_id    BIGINT        NOT NULL REFERENCES students(id)    ON DELETE CASCADE,
@@ -213,7 +220,7 @@ CREATE TABLE assessment_scores (
 
 -- ANNOUNCEMENTS
 
-CREATE TABLE announcements (
+CREATE TABLE IF NOT EXISTS announcements (
     id              BIGSERIAL PRIMARY KEY,
     title           VARCHAR(255) NOT NULL,
     body            TEXT         NOT NULL,
@@ -233,7 +240,7 @@ CREATE TABLE announcements (
 
 -- NOTIFICATIONS
 
-CREATE TABLE notifications (
+CREATE TABLE IF NOT EXISTS notifications (
     id             BIGSERIAL PRIMARY KEY,
     user_id        BIGINT       NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     sender_id      BIGINT       REFERENCES users(id) ON DELETE SET NULL,  -- null = system generated
@@ -256,7 +263,7 @@ CREATE TABLE notifications (
 
 -- PUBLIC WEBSITE
 
-CREATE TABLE contact_inquiries (
+CREATE TABLE IF NOT EXISTS contact_inquiries (
     id           BIGSERIAL PRIMARY KEY,
     full_name    VARCHAR(255) NOT NULL,
     email        VARCHAR(255) NOT NULL,
@@ -268,7 +275,7 @@ CREATE TABLE contact_inquiries (
     submitted_at TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 );
 
-CREATE TABLE staff_profiles (
+CREATE TABLE IF NOT EXISTS staff_profiles (
     id          BIGSERIAL PRIMARY KEY,
     first_name  VARCHAR(255) NOT NULL,
     last_name   VARCHAR(255) NOT NULL,
