@@ -36,7 +36,7 @@ async def get_my_profile(
             FROM students s
             LEFT JOIN classes c ON c.id = s.current_class_id
             WHERE s.user_id = %s
-            """, (user["user_id"],),
+            """, (user["id"],),
         )
 
         row = await cur.fetchone()
@@ -54,10 +54,10 @@ async def get_my_attendance(
     date_from: Optional[date] = Query(None, alias="from"),
     date_to: Optional[date] = Query(None, alias="to")
 ):
-    student = await _get_student_row(conn, user["user_id"])
+    student = await _get_student_row(conn, user["id"])
 
     sql = "SELECT date, status FROM attendance_records WHERE student_id=%s"
-    paramss: list = [studnet["id"]]
+    params: list = [student["id"]]
     if date_from:
         sql += " AND date >= %s"
         params.append(date_from)
@@ -68,21 +68,21 @@ async def get_my_attendance(
 
     async with conn.cursor() as cur:
         await cur.execute(sql, params)
-        row = await cur.fetchall()
+        rows = await cur.fetchall()
     
-    couts = {"present": 0, "absent": 0, "late": 0, "excused": 0}
+    counts = {"present": 0, "absent": 0, "late": 0, "excused": 0}
 
     for r in rows:
-        counts[r["stats"]] += 1
+        counts[r["status"]] += 1
     
     return {"total": len(rows), **counts, "records": rows}
 
-@router.get("/grades", response_model=schemas.GradeRow)
+@router.get("/grades", response_model=list[schemas.GradeRow]) 
 async def get_my_grades(
     user: dict = Depends(require_student),
     conn: AsyncConnection = Depends(get_conn)
 ):
-    student = await _get_student_row(conn, user["user_id"])
+    student = await _get_student_row(conn, user["id"])
 
     async with conn.cursor() as cur:
         await cur.execute(
@@ -104,27 +104,27 @@ async def get_my_grades(
             """, (student["id"],),
         )
 
-        return cur.fetchall()
+        return await cur.fetchall()
 
-@router.get("/notifications", response_model=schemas.NotificationRow)
+@router.get("/notifications", response_model=list[schemas.NotificationRow])
 async def get_my_notification(user: dict = Depends(require_student), conn: AsyncConnection = Depends(get_conn)):
     async with conn.cursor() as cur:
         await cur.execute(
             """
             SELECT id, type, title, body, is_read, created_at
             FROM notifications WHERE user_id = %s
-            ORDER BY create_at DESC
-            """, (user["user_id"],),
+            ORDER BY created_at DESC
+            """, (user["id"],),
         )
     
-    return await cur.fetchall()
+        return await cur.fetchall()
 
 @router.patch("/notifications/{notif_id}/read", status_code=status.HTTP_204_NO_CONTENT)
 async def mark_notification_read(notif_id: int, user: dict = Depends(require_student), conn: AsyncConnection = Depends(get_conn)):
     async with conn.cursor() as cur:
         await cur.execute(
             """ UPDATE notifications SET is_read = TRUE WHERE id = %s AND user_id = %s
-            """, (notif_id, user["user_id"]),
+            """, (notif_id, user["id"]),
         )
 
         if cur.rowcount == 0:
