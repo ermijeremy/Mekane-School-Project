@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from config import CONFIG
 from db.connection import pool
 from student import routes as student_router
+from teacher import routes as teacher_router
 import auth
 import os
 
@@ -34,7 +35,7 @@ app.add_middleware(
 
 app.include_router(auth.router, prefix="/auth")
 app.include_router(student_router.router, prefix="/student")
-
+app.include_router(teacher_router.router, prefix="/teacher")
 
 @app.get("/health")
 async def health():

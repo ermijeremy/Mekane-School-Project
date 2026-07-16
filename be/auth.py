@@ -41,3 +41,8 @@ async def require_student(cur_user: dict = Depends(get_current_user)) -> dict:
     if cur_user["role"] != "student":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Students only")
     return cur_user
+
+async def require_teacher(cur_user: dict = Depends(get_current_user)) -> dict:
+    if cur_user["role"] != "teacher":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Teachers only")
+    return cur_user
